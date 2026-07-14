@@ -108,8 +108,8 @@ A aplicação ficará disponível em **http://localhost:3001**.
 
 ```bash
 cd nestjs-project
-docker compose exec nestjs-api npm test               # unitários + integração
-docker compose exec nestjs-api npm run test:e2e       # end-to-end (HTTP via supertest)
+docker compose exec nestjs-api npm test -- --runInBand  # unitários + integração
+docker compose exec nestjs-api npm run test:e2e         # end-to-end (HTTP via supertest)
 docker compose exec nestjs-api npm run test:cov       # cobertura
 ```
 
