@@ -15,9 +15,9 @@ Ambiente zerado (`docker compose down -v` → `up --build` → `migration:run`) 
 
 Resultado após as correções: `npm test -- --runInBand` (181/181), `npm run test:e2e` (70/70), `npx tsc --noEmit` (0 erros) — todos rodados a partir de um ambiente Docker 100% zerado.
 
-### Lint — dívida pré-existente, não resolvida nesta fase
+### Lint — dívida pré-existente, resolvida separadamente
 
-`npm run lint`: **150 errors, 40 warnings**. Confirmado via `git diff dev` que nenhum desses erros está em arquivo tocado pela Fase 03 (nem nos arquivos corrigidos nesta verificação) — são todos em specs de teste pré-existentes (`channels.service.spec.ts`, `channels.service.ts`, `mail.service.integration-spec.ts`, `test/auth.e2e-spec.ts`, `common/filters/*.spec.ts`, `create-test-data-source.ts`, etc.), a mesma dívida já sinalizada na SI-03.1. Fora do escopo desta fase (não é vídeo/upload/processamento); registrado aqui para não ficar perdido, e segue pendente antes de a Definition of Done do CLAUDE.md poder ser considerada 100% satisfeita.
+`npm run lint` acusou **150 errors, 40 warnings** nesta verificação. Confirmado via `git diff dev` que nenhum desses erros estava em arquivo da Fase 03 — todos em specs de teste pré-existentes (`channels.service.spec.ts`, `channels.service.ts`, `mail.service.integration-spec.ts`, `test/auth.e2e-spec.ts`, `common/filters/*.spec.ts`, `create-test-data-source.ts`, etc.), a mesma dívida já sinalizada na SI-03.1. Por ser fora do escopo de vídeos, a correção foi feita em branch própria (`bugfix/lint-pre-existing-debt`, a partir da `dev`), não nesta feature — resultado: `npm run lint` limpo (0 errors, 1 warning pré-existente que não bloqueia o comando). Definition of Done do `CLAUDE.md` agora 100% satisfeita.
 
 ### SI-03.1 — Infra: object storage (MinIO) e configuração de fila (pg-boss)
 - **Status:** completed
