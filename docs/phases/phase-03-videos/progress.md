@@ -3,6 +3,22 @@
 **Status:** in_progress
 **SIs:** 12/12 completed
 
+## Definition of Done — Verificação (2026-07-14)
+
+Ambiente zerado (`docker compose down -v` → `up --build` → `migration:run`) e suíte completa rodada do zero para validar a Definition of Done do `CLAUDE.md` raiz. Bugs encontrados e corrigidos durante essa verificação (nenhum exige `AskUserQuestion` — todos são correções mecânicas de teste, sem decisão de design):
+
+- `auth.module.spec.ts` / `users.module.spec.ts` / `channels.module.spec.ts` — faltava `Video` em `ALL_ENTITIES`; `Channel` ganhou `@OneToMany(() => Video, ...)` na Fase 03 e o TypeORM exige a entidade relacionada registrada, mesmo em specs de módulo que não usam `Video` diretamente.
+- `env.validation.integration-spec.ts` — faltavam `STORAGE_ACCESS_KEY`/`STORAGE_SECRET_KEY` (obrigatórias em `env.validation.ts` desde a Fase 03) no payload de env do teste.
+- `video-processing.worker.integration-spec.ts` — o teste dependia do bucket MinIO e da fila pg-boss já existirem, criados só como efeito colateral de `VideosService.onModuleInit()` (que roda no processo da API, não no `WorkerModule`). Corrigido: o teste agora provisiona bucket e fila por conta própria (`ensureBucketAndQueueExist()`) antes de inicializar o módulo, sem depender da API ter sido iniciada antes.
+- `database/migrations.integration-spec.ts` (bug pré-existente, anterior à Fase 03) — o `beforeAll` fazia `DROP TABLE ... CASCADE` nas tabelas de auth, mas isso não remove o tipo enum (`verification_tokens_type_enum`) nem limpa a tabela `videos` (que tem FK para `channels`). Isso corrompia o Postgres compartilhado para as suites seguintes (linhas órfãs em `videos`, "type already exists" ao reaplicar migrations). Corrigido: `DROP TYPE IF EXISTS` explícito + `DELETE FROM "videos"` antes de derrubar `channels`/`users`.
+- `package.json` (`test:e2e`) — o `nestjs-project/CLAUDE.md` já documentava e2e "rodando com `--runInBand`", mas o script real não tinha a flag; `npm run test:e2e` sem `--runInBand` roda as suites e2e em paralelo contra o mesmo Postgres, causando corrida (FK violations, `409` virando `201`, `403`/`404` virando `401`). Corrigido adicionando `--runInBand` ao script, para bater com o que já estava documentado.
+
+Resultado após as correções: `npm test -- --runInBand` (181/181), `npm run test:e2e` (70/70), `npx tsc --noEmit` (0 erros) — todos rodados a partir de um ambiente Docker 100% zerado.
+
+### Lint — dívida pré-existente, não resolvida nesta fase
+
+`npm run lint`: **150 errors, 40 warnings**. Confirmado via `git diff dev` que nenhum desses erros está em arquivo tocado pela Fase 03 (nem nos arquivos corrigidos nesta verificação) — são todos em specs de teste pré-existentes (`channels.service.spec.ts`, `channels.service.ts`, `mail.service.integration-spec.ts`, `test/auth.e2e-spec.ts`, `common/filters/*.spec.ts`, `create-test-data-source.ts`, etc.), a mesma dívida já sinalizada na SI-03.1. Fora do escopo desta fase (não é vídeo/upload/processamento); registrado aqui para não ficar perdido, e segue pendente antes de a Definition of Done do CLAUDE.md poder ser considerada 100% satisfeita.
+
 ### SI-03.1 — Infra: object storage (MinIO) e configuração de fila (pg-boss)
 - **Status:** completed
 - **Tests:** no tests

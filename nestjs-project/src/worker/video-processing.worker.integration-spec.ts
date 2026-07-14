@@ -4,10 +4,12 @@ import { ConfigModule, ConfigType } from '@nestjs/config';
 import { Test, TestingModule } from '@nestjs/testing';
 import { getRepositoryToken, TypeOrmModule } from '@nestjs/typeorm';
 import {
+  CreateBucketCommand,
   HeadObjectCommand,
   PutObjectCommand,
   S3Client,
 } from '@aws-sdk/client-s3';
+import PgBoss from 'pg-boss';
 import { DataSource, Repository } from 'typeorm';
 import databaseConfig from '../config/database.config';
 import storageConfig from '../config/storage.config';
@@ -20,10 +22,52 @@ import {
 } from '../test/create-test-data-source';
 import { User } from '../users/entities/user.entity';
 import { Video, VideoStatus } from '../videos/entities/video.entity';
+import {
+  VIDEO_PROCESSING_QUEUE,
+  VIDEO_PROCESSING_RETRY_POLICY,
+} from '../videos/videos.constants';
 import { VideoProcessingWorker } from './video-processing.worker';
 
 const ALL_ENTITIES = [User, Channel, Video];
 const FIXTURE_PATH = join(__dirname, 'fixtures', 'sample-video.mp4');
+
+// The real bucket/queue are provisioned by VideosService.onModuleInit()
+// (see videos.service.ts), which this worker-only module never loads —
+// in production that side effect comes from the nestjs-api process having
+// started at least once. Provision both here so the test doesn't depend
+// on that external process having run first.
+async function ensureBucketAndQueueExist(): Promise<void> {
+  const storage = storageConfig();
+  const s3Client = new S3Client({
+    endpoint: storage.endpoint,
+    region: storage.region,
+    forcePathStyle: true,
+    credentials: {
+      accessKeyId: storage.accessKeyId,
+      secretAccessKey: storage.secretAccessKey,
+    },
+  });
+  try {
+    await s3Client.send(new CreateBucketCommand({ Bucket: storage.bucket }));
+  } catch (err) {
+    const name = (err as { name?: string }).name;
+    if (name !== 'BucketAlreadyOwnedByYou' && name !== 'BucketAlreadyExists') {
+      throw err;
+    }
+  }
+
+  const db = databaseConfig();
+  const boss = new PgBoss({
+    host: db.host,
+    port: db.port,
+    user: db.username,
+    password: db.password,
+    database: db.name,
+  });
+  await boss.start();
+  await boss.createQueue(VIDEO_PROCESSING_QUEUE, VIDEO_PROCESSING_RETRY_POLICY);
+  await boss.stop();
+}
 
 async function createWorkerTestModule(): Promise<TestingModule> {
   const ds = createTestDataSource(ALL_ENTITIES);
@@ -53,6 +97,7 @@ describe('VideoProcessingWorker (integration)', () => {
   let bucket: string;
 
   beforeAll(async () => {
+    await ensureBucketAndQueueExist();
     module = await createWorkerTestModule();
     await module.init();
 

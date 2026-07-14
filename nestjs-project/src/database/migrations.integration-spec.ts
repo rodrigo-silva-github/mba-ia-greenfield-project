@@ -6,6 +6,7 @@ import { VerificationToken } from '../auth/entities/verification-token.entity';
 import { CreateUsersAndChannels1775687773260 } from './migrations/1775687773260-CreateUsersAndChannels';
 import { CreateAuthTokens1777579850478 } from './migrations/1777579850478-CreateAuthTokens';
 import { createTestDataSource } from '../test/create-test-data-source';
+import { Video } from '../videos/entities/video.entity';
 
 const MANAGED_TABLES = [
   'users',
@@ -19,7 +20,7 @@ describe('Database migrations (integration)', () => {
 
   beforeAll(async () => {
     dataSource = createTestDataSource(
-      [User, Channel, RefreshToken, VerificationToken],
+      [User, Channel, RefreshToken, VerificationToken, Video],
       {
         synchronize: false,
         migrations: [
@@ -31,12 +32,25 @@ describe('Database migrations (integration)', () => {
 
     await dataSource.initialize();
 
+    // "videos" is not one of MANAGED_TABLES (this test predates the videos
+    // migration), but it has a FK to "channels". Dropping "channels" CASCADE
+    // below removes that FK constraint yet leaves "videos" rows in place —
+    // once another suite's synchronize() re-adds the constraint, those
+    // orphaned rows make it fail. Clear them first so no orphans survive.
+    await dataSource.query(`DELETE FROM "videos"`);
+
     await Promise.all([
       ...MANAGED_TABLES.map((table) =>
         dataSource.query(`DROP TABLE IF EXISTS "${table}" CASCADE`),
       ),
       dataSource.query(`DROP TABLE IF EXISTS "migrations" CASCADE`),
     ]);
+    // DROP TABLE does not drop enum types used by its columns — they are
+    // independent schema objects and must be dropped explicitly, or the
+    // migration's CREATE TYPE fails with "already exists" on re-run.
+    await dataSource.query(
+      `DROP TYPE IF EXISTS "public"."verification_tokens_type_enum"`,
+    );
   });
 
   afterAll(async () => {
