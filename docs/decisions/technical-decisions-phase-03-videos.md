@@ -46,6 +46,8 @@ _Subprojects in scope:_
 
 **Note:** Decisão divergiu da recomendação — optou-se por reaproveitar o PostgreSQL 17 já existente no `compose.yaml` em vez de introduzir Redis como novo serviço de infraestrutura, trocando a observabilidade visual (Bull Board) e o throughput mais alto do BullMQ pela simplicidade operacional de zero infra nova, aceitável para o volume de um único tipo de job (processamento de vídeo) neste projeto.
 
+**Libraries:** pg-boss
+
 ---
 
 ## TD-02: Estratégia de Upload de Vídeos de até 10GB
@@ -105,6 +107,8 @@ Convenção de organização (aplica-se independente da SDK escolhida): um únic
 
 **Decision:** Option A (AWS SDK v3)
 
+**Libraries:** @aws-sdk/client-s3, @aws-sdk/s3-request-presigner, @aws-sdk/lib-storage
+
 ---
 
 ## TD-04: Arquitetura do Worker de Processamento de Vídeo
@@ -161,6 +165,8 @@ Convenção de organização (aplica-se independente da SDK escolhida): um únic
 **Recommendation:** Option A (`fluent-ffmpeg`) — cobre exatamente as duas operações exigidas (`ffprobe()` para metadados, `.screenshots()` para thumbnail) com métodos documentados e testados, evitando código de parsing/CLI feito à mão sem benefício correspondente neste escopo.
 
 **Decision:** Option A (`fluent-ffmpeg`)
+
+**Libraries:** fluent-ffmpeg
 
 ---
 
