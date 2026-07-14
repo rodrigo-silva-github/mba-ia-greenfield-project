@@ -149,6 +149,60 @@ NestJS with standard module structure. Source lives in `src/`, compiled output i
 - Each domain feature gets its own module (e.g., `UsersModule`, `VideosModule`) registered in `AppModule`
 - Controllers handle HTTP routing; Services hold business logic; both are scoped to their module
 
+## Video Upload & Processing (Phase 03)
+
+Video upload, storage, background processing, and delivery — implemented in `src/videos/`, `src/worker/`, `src/storage/`, and `src/queue/`. Decisions and rationale: `docs/decisions/technical-decisions-phase-03-videos.md`; plan: `docs/phases/phase-03-videos/`.
+
+### Modules
+
+- `VideosModule` (`src/videos/`) — `VideosController`, `VideosService` (draft creation, presigned multipart upload, upload completion, queue publish, bucket/queue bootstrap via `onModuleInit`), `VideosDeliveryService` (ownership/status guards + presigned read URLs for stream/download). Imports `ChannelsModule` to resolve the caller's channel.
+- `WorkerModule` (`src/worker/`, entry point `src/worker.main.ts`) — standalone Nest application (no HTTP listener) running `VideoProcessingWorker`, which consumes the processing queue, extracts metadata/thumbnail via `ffmpeg`/`ffprobe`, and updates the video.
+- `StorageModule` (`src/storage/`, global) — provides `S3_CLIENT`, an `S3Client` pointed at MinIO/S3 (`forcePathStyle: true`).
+- `QueueModule` (`src/queue/`, global) — provides `PG_BOSS`, a `pg-boss` instance over the same PostgreSQL database (`VIDEO_PROCESSING_QUEUE = 'video-processing'`, see `src/videos/videos.constants.ts`).
+
+### Entity & status lifecycle
+
+`Video` (`src/videos/entities/video.entity.ts`, table `videos`, migration `1783986208942-CreateVideos`) belongs to a `Channel` (`channel_id` FK). Status enum: `draft → processing → ready | error`, plus `storage_key`, `thumbnail_storage_key`, `upload_id`, `duration_seconds`, `size_bytes`, `mime_type`, `error_message`.
+
+### Endpoints (`VideosController`, prefix `/videos`)
+
+| Method & Route | Auth | Description |
+|---|---|---|
+| `POST /videos` | required | Pre-registers a draft video and initiates a multipart upload (returns `upload_id`) |
+| `POST /videos/:id/upload-urls` | required, owner only | Returns presigned S3/MinIO multipart part URLs |
+| `POST /videos/:id/complete-upload` | required, owner only | Completes the multipart upload, moves status to `processing`, publishes the `video-processing` job |
+| `GET /videos/:id` | `@OptionalAuth()` | Public video metadata; owner (if authenticated) can also see their own `draft`/`processing`/`error` videos — otherwise hidden behind the generic "not found" |
+| `GET /videos/:id/stream` | `@Public()` | 302 redirect to a presigned S3/MinIO URL; range requests (`Range` / `206 Partial Content`) are handled natively by the storage on the redirected request |
+| `GET /videos/:id/download` | `@Public()` | Same as stream, with `ResponseContentDisposition: attachment` |
+
+### Upload strategy
+
+Files never pass through the API. The client uploads directly to MinIO/S3 via presigned multipart URLs (`CreateMultipartUploadCommand` + per-part `UploadPartCommand` presigned URLs + `CompleteMultipartUploadCommand`), so the API never buffers or streams the file body — this is what makes the 10GB upload viable without blocking the process.
+
+### Background processing
+
+On `complete-upload`, the API publishes a `{ video_id }` job to the `video-processing` pg-boss queue (`VIDEO_PROCESSING_RETRY_POLICY`: `retryLimit: 3`, `retryBackoff: true`). The worker downloads the object to a temp file, runs `ffmpeg.ffprobe()` for duration and `.screenshots()` for the thumbnail, uploads the thumbnail back to storage, and sets the video to `ready`. Any failure sets `status: error` + `error_message` and rethrows, letting pg-boss's native retry policy handle re-attempts; the video is only left in `error` once retries are exhausted.
+
+### Running the worker
+
+```bash
+docker compose exec video-worker npm run start:worker:dev   # watch mode, entry file worker.main.ts
+```
+
+The `video-worker` container's default CMD is idle (`tail -f /dev/null`), same convention as `nestjs-api` — the worker process must be started explicitly, never as part of "starting the environment".
+
+### Testing note
+
+`video-worker` is the only image with `ffmpeg`/`ffprobe` installed (see `Dockerfile.worker` vs `Dockerfile.dev`) — `*.integration-spec.ts` files under `src/worker/` must run there, not in `nestjs-api`:
+
+```bash
+docker compose exec video-worker npm test -- --runInBand
+```
+
+### Environment variables
+
+`STORAGE_ENDPOINT`, `STORAGE_BUCKET`, `STORAGE_REGION`, `STORAGE_ACCESS_KEY`, `STORAGE_SECRET_KEY` (see `.env.example` and `src/config/storage.config.ts`) — `STORAGE_ACCESS_KEY`/`STORAGE_SECRET_KEY` are required by `env.validation.ts` with no default.
+
 ## Code Conventions
 
 - **TypeScript:** `nodenext` module resolution, `ES2023` target, `strictNullChecks` on, `noImplicitAny` off
